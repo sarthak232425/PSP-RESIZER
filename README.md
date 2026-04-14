@@ -1,6 +1,6 @@
 # PSP RESIZER (GUI)
 
-A tiny Tkinter GUI that converts a selected video into a PSP-friendly MP4 using FFmpeg.
+A tiny Tkinter GUI that batch-converts queued videos into device-friendly MP4s (PSP / PS3 / PS Vita) using FFmpeg.
 
 ## Run from source
 

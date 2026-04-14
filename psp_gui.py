@@ -15,16 +15,44 @@ except Exception:  # pragma: no cover
     TkinterDnD = None  # type: ignore
 
 # --- PSP Optimization Settings ---
-PSP_WIDTH = 480
-PSP_HEIGHT = 272
 VIDEO_CODEC = "libx264"
 AUDIO_CODEC = "aac"
 
-# Compression defaults chosen to avoid output size blow-ups.
-DEFAULT_CRF = 26
-DEFAULT_MAXRATE = "600k"
-DEFAULT_BUFSIZE = "1200k"
-DEFAULT_AUDIO_BITRATE = "96k"
+TARGET_PRESETS: dict[str, dict[str, str | int]] = {
+    "PSP": {
+        "prefix": "PSP_",
+        "width": 480,
+        "height": 272,
+        "profile": "baseline",
+        "level": "3.0",
+        "crf": 26,
+        "maxrate": "600k",
+        "bufsize": "1200k",
+        "audio_bitrate": "96k",
+    },
+    "PS Vita": {
+        "prefix": "VITA_",
+        "width": 960,
+        "height": 544,
+        "profile": "main",
+        "level": "4.0",
+        "crf": 24,
+        "maxrate": "1500k",
+        "bufsize": "3000k",
+        "audio_bitrate": "128k",
+    },
+    "PS3": {
+        "prefix": "PS3_",
+        "width": 1280,
+        "height": 720,
+        "profile": "high",
+        "level": "4.1",
+        "crf": 23,
+        "maxrate": "3500k",
+        "bufsize": "7000k",
+        "audio_bitrate": "160k",
+    },
+}
 
 
 def get_base_dir() -> str:
@@ -62,6 +90,8 @@ class PSPConverterApp:
 
         base_dir = get_base_dir()
         self.output_dir = tk.StringVar(value=os.path.join(base_dir, "output"))
+
+        self.target_device = tk.StringVar(value="PSP")
 
         self._queued_files: list[str] = []
         self._queued_set: set[str] = set()
@@ -118,6 +148,16 @@ class PSPConverterApp:
         ttk.Label(frame_top, text="Output Folder:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
         ttk.Entry(frame_top, textvariable=self.output_dir).grid(row=1, column=1, sticky="ew", padx=8, pady=(10, 0))
         ttk.Button(frame_top, text="Browse", command=self._browse_output).grid(row=1, column=2, sticky="e", pady=(10, 0))
+
+        ttk.Label(frame_top, text="Target Device:").grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
+        self.target_combo = ttk.Combobox(
+            frame_top,
+            textvariable=self.target_device,
+            values=list(TARGET_PRESETS.keys()),
+            state="readonly",
+            width=20,
+        )
+        self.target_combo.grid(row=2, column=1, sticky="w", padx=8, pady=(10, 0))
 
         frame_mid = ttk.Frame(self.root)
         frame_mid.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
@@ -355,6 +395,10 @@ class PSPConverterApp:
                 self._log("[ERROR] ffmpeg.exe not found. Put it next to the app or add it to PATH.")
                 return
 
+            preset_name = self.target_device.get() or "PSP"
+            preset = TARGET_PRESETS.get(preset_name, TARGET_PRESETS["PSP"])
+            self._log(f"Target: {preset_name}")
+
             index = 0
             while True:
                 with self._queue_lock:
@@ -377,7 +421,8 @@ class PSPConverterApp:
 
                 filename = os.path.basename(inp_file)
                 clean_name = os.path.splitext(filename)[0]
-                output_path = os.path.join(out, f"PSP_{clean_name}.mp4")
+                prefix = str(preset["prefix"])
+                output_path = os.path.join(out, f"{prefix}{clean_name}.mp4")
 
                 self._cancel_current.clear()
                 self._log(f"[{index}/{index + remaining - 1}] Converting: {filename}")
@@ -395,6 +440,7 @@ class PSPConverterApp:
                     log=self._log,
                     cancel_event=self._cancel_current,
                     set_process=self._set_current_process,
+                    preset=preset,
                 )
 
                 if ok:
@@ -459,7 +505,17 @@ def _run_ffmpeg_with_progress(
     log: "callable[[str], None]",
     cancel_event: threading.Event,
     set_process: "callable[[subprocess.Popen[str] | None], None]",
+    preset: dict[str, str | int],
 ) -> bool:
+    width = int(preset.get("width", 480))
+    height = int(preset.get("height", 272))
+    profile = str(preset.get("profile", "baseline"))
+    level = str(preset.get("level", "3.0"))
+    crf = str(preset.get("crf", 26))
+    maxrate = str(preset.get("maxrate", "600k"))
+    bufsize = str(preset.get("bufsize", "1200k"))
+    audio_bitrate = str(preset.get("audio_bitrate", "96k"))
+
     cmd = [
         ffmpeg_bin,
         "-hide_banner",
@@ -471,29 +527,29 @@ def _run_ffmpeg_with_progress(
         input_path,
         "-vf",
         (
-            f"scale={PSP_WIDTH}:{PSP_HEIGHT}:force_original_aspect_ratio=decrease,"
-            f"pad={PSP_WIDTH}:{PSP_HEIGHT}:(ow-iw)/2:(oh-ih)/2"
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
         ),
         "-c:v",
         VIDEO_CODEC,
         "-profile:v",
-        "baseline",
+        profile,
         "-level",
-        "3.0",
+        level,
         "-pix_fmt",
         "yuv420p",
         "-preset",
         "veryfast",
         "-crf",
-        str(DEFAULT_CRF),
+        crf,
         "-maxrate",
-        DEFAULT_MAXRATE,
+        maxrate,
         "-bufsize",
-        DEFAULT_BUFSIZE,
+        bufsize,
         "-c:a",
         AUDIO_CODEC,
         "-b:a",
-        DEFAULT_AUDIO_BITRATE,
+        audio_bitrate,
         "-ar",
         "44100",
         "-ac",
